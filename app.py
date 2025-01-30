@@ -6,121 +6,131 @@ import plotly.graph_objects as go
 # Page config
 st.set_page_config(page_title="Hemlock Analytics", page_icon="🍸", layout="wide")
 
+def clean_numeric(value):
+    """Clean numeric values from currency and formatting"""
+    if isinstance(value, str):
+        return pd.to_numeric(value.replace('$', '').replace(',', ''), errors='coerce')
+    return value
+
 def load_data():
     try:
         df = pd.read_excel('Hemlock2023.xlsx')
-        # Convert 'Total sales' and percentages to numeric, removing any currency symbols
-        df['Total sales'] = pd.to_numeric(df['Total sales'].astype(str).str.replace('$', '').str.replace(',', ''), errors='coerce')
+        
+        # Clean numeric columns
+        numeric_columns = ['Total sales', 'USD/cover', 'USD/receipt']
+        for col in numeric_columns:
+            if col in df.columns:
+                df[col] = df[col].apply(clean_numeric)
+        
+        # Convert percentage columns
+        pct_columns = ['% of Total', '% of Total.1', '% of Total.2']
+        for col in pct_columns:
+            if col in df.columns:
+                df[col] = df[col].apply(lambda x: float(str(x).rstrip('%')) / 100 if pd.notnull(x) else x)
+        
         return df
     except Exception as e:
         st.error(f"Error loading data: {str(e)}")
         return None
 
-def create_metrics(df):
-    # Calculate total sales and other metrics
-    total_sales = df['Total sales'].sum()
-    total_receipts = df['Receipts'].sum()
-    avg_receipt = total_sales / total_receipts if total_receipts > 0 else 0
-    
-    # Display metrics
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("Total Sales", f"${total_sales:,.2f}")
-    with col2:
-        st.metric("Total Receipts", f"{total_receipts:,}")
-    with col3:
-        st.metric("Average Receipt", f"${avg_receipt:.2f}")
-
-def create_sales_chart(df):
-    # Create a bar chart of sales by order type
-    fig = px.bar(df, 
-                 x='Order type', 
-                 y='Total sales',
-                 title='Sales by Order Type',
-                 labels={'Total sales': 'Sales ($)', 'Order type': 'Type'})
-    fig.update_traces(marker_color='rgb(55, 83, 109)')
-    st.plotly_chart(fig, use_container_width=True)
-
-def create_receipts_chart(df):
-    # Create a pie chart showing receipt distribution
-    fig = px.pie(df, 
-                 values='Receipts',
-                 names='Order type',
-                 title='Receipt Distribution by Order Type')
-    st.plotly_chart(fig, use_container_width=True)
+def format_currency(value):
+    """Format number as currency"""
+    return f"${value:,.2f}"
 
 def main():
+    st.title("🍸 Hemlock Bar Analytics Dashboard")
+    
     # Authentication
     if 'authenticated' not in st.session_state:
-        st.markdown("### Login")
-        username = st.text_input("Username")
-        password = st.text_input("Password", type="password")
-        
-        if st.button("Log In"):
-            if username.lower() == "admin" and password == "Hemlock123":
-                st.session_state['authenticated'] = True
-                st.rerun()
-            else:
-                st.error("Invalid credentials")
+        col1, col2 = st.columns([1, 2])
+        with col1:
+            st.markdown("### Login")
+            username = st.text_input("Username")
+            password = st.text_input("Password", type="password")
+            
+            if st.button("Log In"):
+                if username.lower() == "admin" and password == "Hemlock123":
+                    st.session_state['authenticated'] = True
+                    st.rerun()
+                else:
+                    st.error("Invalid credentials")
         return
-    
-    # Main dashboard
-    st.title("🍸 Hemlock Bar Analytics Dashboard")
     
     df = load_data()
     if df is not None:
-        tabs = st.tabs(["Sales Overview", "Order Analysis"])
+        tabs = st.tabs(["Sales Overview", "Detailed Analysis"])
         
         with tabs[0]:
             st.header("Sales Overview")
-            create_metrics(df)
             
-            # Display KPIs
-            st.subheader("Key Performance Indicators")
-            kpi_cols = st.columns(2)
+            # Top-level metrics
+            metrics_cols = st.columns(3)
+            with metrics_cols[0]:
+                total_sales = df['Total sales'].sum()
+                st.metric("Total Sales", format_currency(total_sales))
             
-            with kpi_cols[0]:
-                st.metric("Average USD/Cover", 
-                         f"${df['USD/cover'].mean():.2f}")
-            with kpi_cols[1]:
-                st.metric("Average USD/Receipt", 
-                         f"${df['USD/receipt'].mean():.2f}")
+            with metrics_cols[1]:
+                total_receipts = df['Receipts'].sum()
+                st.metric("Total Receipts", f"{total_receipts:,.0f}")
             
-            create_sales_chart(df)
+            with metrics_cols[2]:
+                avg_per_receipt = total_sales / total_receipts if total_receipts > 0 else 0
+                st.metric("Average Per Receipt", format_currency(avg_per_receipt))
+            
+            # Daily average metrics
+            st.subheader("Performance Metrics")
+            daily_cols = st.columns(2)
+            with daily_cols[0]:
+                avg_cover = df['USD/cover'].mean()
+                st.metric("Average USD/Cover", format_currency(avg_cover))
+            
+            with daily_cols[1]:
+                avg_receipt = df['USD/receipt'].mean()
+                st.metric("Average USD/Receipt", format_currency(avg_receipt))
+            
+            # Sales visualization
+            st.subheader("Sales Distribution")
+            fig = px.bar(df,
+                        x='Order type',
+                        y='Total sales',
+                        title='Sales by Order Type',
+                        color='Order type',
+                        labels={'Total sales': 'Sales ($)', 'Order type': 'Type'})
+            
+            fig.update_layout(showlegend=False,
+                            xaxis_title="Order Type",
+                            yaxis_title="Sales ($)")
+            
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Detailed metrics table
+            st.subheader("Detailed Metrics")
+            formatted_df = df.copy()
+            formatted_df['Total sales'] = formatted_df['Total sales'].apply(format_currency)
+            formatted_df['USD/cover'] = formatted_df['USD/cover'].apply(format_currency)
+            formatted_df['USD/receipt'] = formatted_df['USD/receipt'].apply(format_currency)
+            st.dataframe(formatted_df.style.format({
+                '% of Total': '{:.1%}',
+                '% of Total.1': '{:.1%}',
+                '% of Total.2': '{:.1%}'
+            }))
         
         with tabs[1]:
-            st.header("Order Analysis")
+            st.header("Detailed Analysis")
             
-            # Filter by order type
-            order_type = st.selectbox("Select Order Type", 
-                                    df['Order type'].unique())
+            # Order type analysis
+            selected_type = st.selectbox("Select Order Type", df['Order type'].unique())
+            type_data = df[df['Order type'] == selected_type]
             
-            filtered_df = df[df['Order type'] == order_type]
-            
-            # Display detailed metrics
-            st.subheader(f"Details for {order_type}")
-            detail_cols = st.columns(3)
-            
-            with detail_cols[0]:
-                st.metric("Sales", 
-                         f"${filtered_df['Total sales'].iloc[0]:,.2f}")
-            with detail_cols[1]:
-                st.metric("Covers", 
-                         f"{filtered_df['Covers'].iloc[0]:,}")
-            with detail_cols[2]:
-                st.metric("Receipts",
-                         f"{filtered_df['Receipts'].iloc[0]:,}")
-            
-            # Display data table
-            st.subheader("Detailed Data")
-            st.dataframe(filtered_df[[
-                'Order type', 'Total sales', 'Covers', 
-                'Receipts', 'USD/cover', 'USD/receipt'
-            ]].style.format({
-                'Total sales': '${:,.2f}',
-                'USD/cover': '${:,.2f}',
-                'USD/receipt': '${:,.2f}'
-            }))
+            if not type_data.empty:
+                st.subheader(f"Metrics for {selected_type}")
+                type_cols = st.columns(3)
+                with type_cols[0]:
+                    st.metric("Sales", format_currency(type_data['Total sales'].iloc[0]))
+                with type_cols[1]:
+                    st.metric("% of Total Sales", f"{type_data['% of Total'].iloc[0]:.1%}")
+                with type_cols[2]:
+                    st.metric("Average Ticket", format_currency(type_data['USD/receipt'].iloc[0]))
 
 if __name__ == "__main__":
     main()
