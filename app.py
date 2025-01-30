@@ -1,186 +1,93 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
-import numpy as np
-from datetime import datetime
-import hashlib
 
 # Page config
 st.set_page_config(page_title="Hemlock Analytics", page_icon="🍸", layout="wide")
-
-# Authentication
-def check_password():
-    def password_entered():
-        if (st.session_state["username"].lower() == "admin" 
-            and st.session_state["password"] == "Hemlock123"):
-            st.session_state["password_correct"] = True
-            del st.session_state["password"]
-            del st.session_state["username"]
-        else:
-            st.session_state["password_correct"] = False
-
-    if "password_correct" not in st.session_state:
-        st.markdown("""
-            <style>
-                .stTextInput > div > div > input {
-                    width: 300px;
-                }
-            </style>""", unsafe_allow_html=True)
-        
-        st.title("🍸 Hemlock Bar Analytics")
-        col1, col2 = st.columns([1, 2])
-        with col1:
-            st.markdown("### Login")
-            st.text_input("Username", key="username")
-            st.text_input("Password", type="password", key="password")
-            st.button("Log In", on_click=password_entered)
-        return False
-    
-    elif not st.session_state["password_correct"]:
-        st.text_input("Username", key="username")
-        st.text_input("Password", type="password", key="password")
-        st.error("😕 Invalid credentials")
-        st.button("Log In", on_click=password_entered)
-        return False
-    else:
-        return True
 
 def load_data():
     try:
         # Read the Excel file
         df = pd.read_excel('Hemlock2023.xlsx')
+        # Print columns for debugging
+        st.write("Available columns:", list(df.columns))
         return df
     except Exception as e:
         st.error(f"Error loading data: {str(e)}")
         return None
 
-def create_summary_metrics(df):
-    # Calculate key metrics
-    total_sales = df['Total Amount'].sum()
-    total_transactions = df['Total Transaction Count'].sum()
-    avg_ticket = total_sales / total_transactions if total_transactions > 0 else 0
-    
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("Total Sales", f"${total_sales:,.2f}")
-    with col2:
-        st.metric("Total Transactions", f"{total_transactions:,}")
-    with col3:
-        st.metric("Average Ticket", f"${avg_ticket:.2f}")
-
-def create_category_analysis(df):
-    # Group by main categories
-    categories = df.groupby('SKU').agg({
-        'Total Amount': 'sum',
-        'Total Transaction Count': 'sum'
-    }).reset_index()
-    
-    # Sales by Category
-    fig_sales = px.bar(categories.sort_values('Total Amount', ascending=True), 
-                      y='SKU', x='Total Amount',
-                      title='Sales by Category',
-                      orientation='h',
-                      labels={'Total Amount': 'Sales ($)', 'SKU': 'Category'},
-                      color='Total Amount',
-                      color_continuous_scale='Viridis')
-    st.plotly_chart(fig_sales, use_container_width=True)
-    
-    # Transactions by Category
-    fig_trans = px.bar(categories.sort_values('Total Transaction Count', ascending=True),
-                      y='SKU', x='Total Transaction Count',
-                      title='Transactions by Category',
-                      orientation='h',
-                      labels={'Total Transaction Count': 'Number of Transactions', 'SKU': 'Category'},
-                      color='Total Transaction Count',
-                      color_continuous_scale='Viridis')
-    st.plotly_chart(fig_trans, use_container_width=True)
-
 def main():
-    st.markdown("""
-        <style>
-        .main {
-            padding: 0rem 1rem;
-        }
-        .stTabs [data-baseweb="tab-list"] {
-            gap: 2px;
-        }
-        .stTabs [data-baseweb="tab"] {
-            padding: 10px 20px;
-            background-color: #f0f2f6;
-        }
-        </style>
-        """, unsafe_allow_html=True)
-
     st.title("🍸 Hemlock Bar Analytics Dashboard")
     
-    # Load data
+    # Check authentication
+    if 'authenticated' not in st.session_state:
+        # Login form
+        st.markdown("### Login")
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+        
+        if st.button("Log In"):
+            if username.lower() == "admin" and password == "Hemlock123":
+                st.session_state['authenticated'] = True
+                st.rerun()
+            else:
+                st.error("Invalid credentials")
+        return
+    
+    # Load and display data
     df = load_data()
     
     if df is not None:
-        # Create tabs
-        tabs = st.tabs(["Overview", "Sales Analysis", "Category Details", "Menu Performance"])
+        # Create tabs for different views
+        tab1, tab2 = st.tabs(["Sales Overview", "Category Analysis"])
         
-        # Overview Tab
-        with tabs[0]:
-            st.header("Business Overview")
-            create_summary_metrics(df)
-            create_category_analysis(df)
+        with tab1:
+            st.header("Sales Overview")
+            
+            # Display raw data for debugging
+            st.subheader("Raw Data Preview")
+            st.dataframe(df.head())
+            
+            # Display column information
+            st.subheader("Column Information")
+            st.write(df.info())
+            
+            try:
+                # Summary metrics
+                sales_col = [col for col in df.columns if 'amount' in col.lower() or 'sales' in col.lower()]
+                trans_col = [col for col in df.columns if 'transaction' in col.lower()]
+                
+                if sales_col and trans_col:
+                    total_sales = df[sales_col[0]].sum()
+                    total_transactions = df[trans_col[0]].sum()
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.metric("Total Sales", f"${total_sales:,.2f}")
+                    with col2:
+                        st.metric("Total Transactions", f"{total_transactions:,}")
+            except Exception as e:
+                st.error(f"Error calculating metrics: {str(e)}")
         
-        # Sales Analysis Tab
-        with tabs[1]:
-            st.header("Sales Analysis")
+        with tab2:
+            st.header("Category Analysis")
             
-            # Filters
-            col1, col2 = st.columns([1, 3])
-            with col1:
-                st.subheader("Filters")
-                selected_categories = st.multiselect("Categories", 
-                                                   df['SKU'].unique(),
-                                                   default=df['SKU'].unique())
-            
-            # Filtered data visualizations
-            filtered_df = df[df['SKU'].isin(selected_categories)]
-            fig = px.pie(filtered_df, 
-                        values='Total Amount', 
-                        names='SKU',
-                        title='Sales Distribution by Category')
-            st.plotly_chart(fig, use_container_width=True)
-        
-        # Category Details Tab
-        with tabs[2]:
-            st.header("Category Performance")
-            selected_cat = st.selectbox("Select Category", df['SKU'].unique())
-            cat_data = df[df['SKU'] == selected_cat]
-            
-            # Category metrics
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Category Sales", 
-                         f"${cat_data['Total Amount'].sum():,.2f}")
-            with col2:
-                st.metric("Category Transactions", 
-                         f"{cat_data['Total Transaction Count'].sum():,}")
-            with col3:
-                avg_transaction = (cat_data['Total Amount'].sum() / 
-                                 cat_data['Total Transaction Count'].sum() 
-                                 if cat_data['Total Transaction Count'].sum() > 0 else 0)
-                st.metric("Average Transaction", f"${avg_transaction:.2f}")
-        
-        # Menu Performance Tab
-        with tabs[3]:
-            st.header("Menu Performance")
-            st.subheader("Top Items by Revenue")
-            
-            # Top items table
-            top_items = df.nlargest(10, 'Total Amount')[
-                ['SKU', 'Total Amount', 'Total Transaction Count']
-            ].reset_index(drop=True)
-            
-            st.dataframe(top_items.style.format({
-                'Total Amount': '${:,.2f}',
-                'Total Transaction Count': '{:,}'
-            }))
+            try:
+                # Category selector
+                if 'SKU' in df.columns:
+                    selected_category = st.selectbox(
+                        "Select Category",
+                        options=sorted(df['SKU'].unique())
+                    )
+                    
+                    if selected_category:
+                        cat_data = df[df['SKU'] == selected_category]
+                        st.write(f"Data for {selected_category}:")
+                        st.dataframe(cat_data)
+                else:
+                    st.warning("Category column (SKU) not found in the data")
+            except Exception as e:
+                st.error(f"Error in category analysis: {str(e)}")
 
-if check_password():
+if __name__ == "__main__":
     main()
