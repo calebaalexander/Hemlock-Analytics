@@ -6,7 +6,7 @@ from datetime import datetime
 
 # Page config
 st.set_page_config(
-    page_title="Hemlock Bar Analytics",
+    page_title="Pris Bar Analytics",
     page_icon="🍸",
     layout="wide",
     initial_sidebar_state="collapsed"
@@ -59,7 +59,7 @@ def create_metric_card(title, value, comparison=None, delta=None):
     """, unsafe_allow_html=True)
 
 def main():
-    st.title("🍸 Hemlock Bar Performance Dashboard")
+    st.title("🍸 Pris Bar Performance Dashboard")
 
     if 'authenticated' not in st.session_state:
         col1, col2 = st.columns([1, 2])
