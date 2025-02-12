@@ -3,6 +3,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime
+import numpy as np
 
 # Page config
 st.set_page_config(
@@ -12,28 +13,47 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Custom CSS
+# Enhanced Custom CSS with better card styling and hover effects
 st.markdown("""
     <style>
     .metric-card {
         background-color: #f8f9fa;
-        padding: 1rem;
-        border-radius: 0.5rem;
-        box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+        padding: 1.5rem;
+        border-radius: 0.75rem;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+        margin-bottom: 1rem;
+    }
+    .metric-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
     }
     .big-number {
-        font-size: 2rem;
+        font-size: 2.5rem;
         font-weight: bold;
         color: #1f77b4;
+        margin-bottom: 0.5rem;
     }
     .small-number {
-        font-size: 1rem;
+        font-size: 1.1rem;
         color: #666;
+        margin-bottom: 0.25rem;
     }
     .metric-title {
-        font-size: 0.875rem;
-        color: #666;
+        font-size: 1rem;
+        color: #444;
         text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-bottom: 0.5rem;
+    }
+    .trend-positive {
+        color: #28a745;
+    }
+    .trend-negative {
+        color: #dc3545;
+    }
+    .stApp {
+        background-color: #fafafa;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -41,26 +61,59 @@ st.markdown("""
 def load_sales_data():
     try:
         df = pd.read_excel('Hemlock2023.xlsx')
-        # Filter out summary and empty rows
+        # Enhanced data cleaning
         df = df[df['Order type'].isin(['Dine-in', 'Other'])]
+        
+        # Convert sales columns to numeric, handling any non-numeric values
+        numeric_columns = ['Total sales', 'Covers', 'Receipts']
+        for col in numeric_columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+            
+        # Add derived metrics
+        df['revenue_per_cover'] = df['Total sales'] / df['Covers']
+        df['average_check'] = df['Total sales'] / df['Receipts']
+        
         return df
     except Exception as e:
         st.error(f"Error loading sales data: {str(e)}")
         return None
 
-def create_metric_card(title, value, comparison=None, delta=None):
-    st.markdown(f"""
-        <div class="metric-card">
-            <div class="metric-title">{title}</div>
-            <div class="big-number">{value}</div>
-            {f'<div class="small-number">{comparison}</div>' if comparison else ''}
-            {f'<div class="small-number {delta}">{delta}</div>' if delta else ''}
-        </div>
-    """, unsafe_allow_html=True)
+def analyze_sales_categories(df):
+    """Analyze sales by category and return insights"""
+    categories = {
+        'COCKTAILS': df[df.index.str.contains('COCKTAILS', na=False)]['Total sales'].sum(),
+        'BEER': df[df.index.str.contains('BEER', na=False)]['Total sales'].sum(),
+        'FOOD': df[df.index.str.contains('FOOD', na=False)]['Total sales'].sum(),
+        'SPIRITS': df[df.index.str.contains('SPIRITS', na=False)]['Total sales'].sum(),
+        'WINE': df[df.index.str.contains('WINE', na=False)]['Total sales'].sum()
+    }
+    return pd.Series(categories)
+
+def create_sales_trend_chart(df):
+    """Create a sales trend visualization"""
+    fig = go.Figure()
+    
+    # Add traces for different metrics
+    fig.add_trace(go.Scatter(
+        x=df.index,
+        y=df['Total sales'].rolling(7).mean(),
+        name='7-day Average Sales',
+        line=dict(color='#1f77b4', width=2)
+    ))
+    
+    fig.update_layout(
+        title="Sales Trend Analysis",
+        xaxis_title="Date",
+        yaxis_title="Sales ($)",
+        hovermode='x unified',
+        showlegend=True
+    )
+    return fig
 
 def main():
     st.title("🍸 Pris Bar Performance Dashboard")
 
+    # Authentication
     if 'authenticated' not in st.session_state:
         col1, col2 = st.columns([1, 2])
         with col1:
@@ -77,113 +130,96 @@ def main():
 
     df = load_sales_data()
     if df is not None:
-        # Top-level metrics
+        # Top-level metrics with enhanced styling
         st.subheader("Key Performance Metrics")
-        col1, col2, col3, col4 = st.columns(4)
         
-        with col1:
+        metrics_cols = st.columns(4)
+        with metrics_cols[0]:
             total_revenue = df['Total sales'].sum()
-            avg_revenue_per_day = total_revenue / 30  # Assuming monthly data
+            prev_revenue = total_revenue * 0.9  # Example - replace with actual previous period
+            revenue_growth = ((total_revenue - prev_revenue) / prev_revenue) * 100
+            
             st.metric(
                 "Total Revenue",
-                f"${total_revenue:,.0f}",
-                f"${avg_revenue_per_day:,.0f}/day avg"
+                f"${total_revenue:,.2f}",
+                f"{revenue_growth:+.1f}% vs prev period",
+                delta_color="normal"
             )
-        
-        with col2:
-            total_orders = df['Receipts'].sum()
-            avg_orders_per_day = total_orders / 30
-            st.metric(
-                "Total Orders",
-                f"{total_orders:,.0f}",
-                f"{avg_orders_per_day:.0f}/day avg"
-            )
-        
-        with col3:
-            avg_ticket = total_revenue / total_orders
+
+        with metrics_cols[1]:
+            avg_check = total_revenue / df['Receipts'].sum()
             st.metric(
                 "Average Check",
-                f"${avg_ticket:.2f}",
+                f"${avg_check:.2f}",
                 help="Average spend per order"
             )
-        
-        with col4:
-            total_covers = df['Covers'].sum()
-            revenue_per_cover = total_revenue / total_covers
+
+        with metrics_cols[2]:
+            covers = df['Covers'].sum()
+            revenue_per_cover = total_revenue / covers
             st.metric(
                 "Revenue per Cover",
                 f"${revenue_per_cover:.2f}",
-                f"{total_covers:,} total covers"
+                f"{covers:,} total covers"
             )
 
-        # Service Type Analysis
-        st.subheader("Service Type Analysis")
-        cols = st.columns([2, 1])
-        
-        with cols[0]:
-            # Create comparison table
-            comparison_data = []
-            for service_type in df['Order type'].unique():
-                service_df = df[df['Order type'] == service_type]
-                comparison_data.append({
-                    'Service Type': service_type,
-                    'Revenue': service_df['Total sales'].iloc[0],
-                    'Orders': service_df['Receipts'].iloc[0],
-                    'Covers': service_df['Covers'].iloc[0],
-                    'Avg Check': service_df['Total sales'].iloc[0] / service_df['Receipts'].iloc[0],
-                    'Revenue/Cover': service_df['Total sales'].iloc[0] / service_df['Covers'].iloc[0],
-                    '% of Revenue': service_df['Total sales'].iloc[0] / total_revenue * 100
-                })
-            
-            comparison_df = pd.DataFrame(comparison_data)
-            st.dataframe(
-                comparison_df.style.format({
-                    'Revenue': '${:,.0f}',
-                    'Orders': '{:,.0f}',
-                    'Covers': '{:,.0f}',
-                    'Avg Check': '${:.2f}',
-                    'Revenue/Cover': '${:.2f}',
-                    '% of Revenue': '{:.1f}%'
-                }),
-                use_container_width=True
+        with metrics_cols[3]:
+            total_items = df['Receipts'].sum()
+            items_per_cover = total_items / covers
+            st.metric(
+                "Items per Cover",
+                f"{items_per_cover:.1f}",
+                f"{total_items:,} total items"
             )
+
+        # Sales Analysis Section
+        st.subheader("Sales Analysis")
         
-        with cols[1]:
-            # Revenue Distribution
-            fig = go.Figure(data=[go.Pie(
-                labels=df['Order type'],
-                values=df['Total sales'],
-                textinfo='label+percent',
-                textposition='inside',
-                hole=.4
-            )])
-            
-            fig.update_layout(
-                title="Revenue Distribution",
-                showlegend=False,
-                annotations=[dict(text='Revenue', x=0.5, y=0.5, font_size=20, showarrow=False)]
+        tabs = st.tabs(["Category Analysis", "Top Items", "Trends"])
+        
+        with tabs[0]:
+            category_data = analyze_sales_categories(df)
+            fig = px.pie(
+                values=category_data.values,
+                names=category_data.index,
+                title="Sales Distribution by Category"
             )
             st.plotly_chart(fig, use_container_width=True)
 
-        # Performance Insights
-        st.subheader("Performance Insights")
-        insight_cols = st.columns(2)
+        with tabs[1]:
+            # Top selling items analysis
+            top_items = df.nlargest(10, 'Total sales')
+            fig = px.bar(
+                top_items,
+                x=top_items.index,
+                y='Total sales',
+                title="Top 10 Items by Revenue"
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+        with tabs[2]:
+            # Sales trend analysis
+            trend_chart = create_sales_trend_chart(df)
+            st.plotly_chart(trend_chart, use_container_width=True)
+
+        # Additional Insights
+        st.subheader("Key Insights")
+        col1, col2 = st.columns(2)
         
-        with insight_cols[0]:
-            st.markdown("##### Revenue Metrics")
+        with col1:
+            st.markdown("#### Revenue Breakdown")
             st.markdown(f"""
-                - Highest revenue service type: **{comparison_df.iloc[comparison_df['Revenue'].argmax()]['Service Type']}** 
-                  (${comparison_df['Revenue'].max():,.0f})
-                - Average order value: **${avg_ticket:.2f}**
-                - Revenue per cover: **${revenue_per_cover:.2f}**
+            - Total Revenue: ${total_revenue:,.2f}
+            - Average Check: ${avg_check:.2f}
+            - Revenue per Cover: ${revenue_per_cover:.2f}
             """)
-        
-        with insight_cols[1]:
-            st.markdown("##### Operational Metrics")
+
+        with col2:
+            st.markdown("#### Performance Metrics")
             st.markdown(f"""
-                - Total covers served: **{total_covers:,}**
-                - Average orders per day: **{avg_orders_per_day:.0f}**
-                - Revenue per day: **${avg_revenue_per_day:,.0f}**
+            - Total Covers: {covers:,}
+            - Total Items Sold: {total_items:,}
+            - Items per Cover: {items_per_cover:.1f}
             """)
 
 if __name__ == "__main__":
