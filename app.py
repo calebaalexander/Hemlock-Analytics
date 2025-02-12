@@ -12,21 +12,21 @@ st.set_page_config(
 )
 
 def load_and_process_data():
-    """Load and process the Pine Excel data"""
+    """Load and process the Pine Excel data with correct column names"""
     try:
         # Read the Excel file
         df = pd.read_excel('Pine.xlsx', sheet_name='2023 Product Breakdown')
         
-        # Convert columns to numeric
-        numeric_cols = ['Total Amount', 'Total Quantity', 'Total Transactions', 'Costs', 'Margin']
+        # Convert columns to numeric - using exact column names from Excel
+        numeric_cols = ['Total Amount', 'Total Quanti', 'Total Trans', 'Margin', 'Costs']
         for col in numeric_cols:
             df[col] = pd.to_numeric(df[col], errors='coerce')
         
         # Calculate summary metrics
         summary = {
             'total_sales': df['Total Amount'].sum(),
-            'total_transactions': df['Total Transactions'].sum(),
-            'total_quantity': df['Total Quantity'].sum(),
+            'total_quantity': df['Total Quanti'].sum(),
+            'total_transactions': df['Total Trans'].sum(),
             'total_costs': df['Costs'].sum(),
             'total_margin': df['Margin'].sum()
         }
@@ -119,7 +119,7 @@ def main():
         st.write(f"• Best selling product: {top_performer['SKU']}")
         st.write(f"• Highest revenue: ${top_performer['Total Amount']:,.2f}")
         st.write(f"• Best margin: ${df['Margin'].max():,.2f}")
-        st.write(f"• Most transactions: {df['Total Transactions'].max():,}")
+        st.write(f"• Most transactions: {df['Total Trans'].max():,}")
     
     with col2:
         st.subheader("Sales Summary")
