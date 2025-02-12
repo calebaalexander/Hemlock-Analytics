@@ -3,7 +3,6 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import numpy as np
-from datetime import datetime
 
 st.set_page_config(
     page_title="Pris Bar Analytics",
@@ -12,159 +11,144 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-def load_and_clean_data():
-    """Load and clean the Excel data"""
+def load_and_process_data():
+    """Load and process the Pine Excel data"""
     try:
-        df = pd.read_excel('Hemlock2023.xlsx')
+        # Read the Excel file
+        df = pd.read_excel('Pine.xlsx', sheet_name='2023 Product Breakdown')
         
-        # Clean numeric columns
-        numeric_columns = ['Total sales', 'Covers', 'Receipts', 'USD/cover', 'USD/receipt']
-        for col in numeric_columns:
+        # Convert columns to numeric
+        numeric_cols = ['Total Amount', 'Total Quantity', 'Total Transactions', 'Costs', 'Margin']
+        for col in numeric_cols:
             df[col] = pd.to_numeric(df[col], errors='coerce')
         
-        # Basic cleaning
-        df = df[df['Order type'].notna()]
-        return df
-        
-    except Exception as e:
-        st.error(f"Error loading data: {str(e)}")
-        return None
-
-def calculate_metrics(df):
-    """Calculate key metrics and insights"""
-    try:
-        metrics = {
-            'total_sales': df['Total sales'].sum(),
-            'avg_check': df['Total sales'].sum() / df['Receipts'].sum(),
-            'revenue_per_cover': df['Total sales'].sum() / df['Covers'].sum(),
-            'items_per_cover': df['Receipts'].sum() / df['Covers'].sum(),
-            'total_covers': df['Covers'].sum(),
-            'total_receipts': df['Receipts'].sum()
+        # Calculate summary metrics
+        summary = {
+            'total_sales': df['Total Amount'].sum(),
+            'total_transactions': df['Total Transactions'].sum(),
+            'total_quantity': df['Total Quantity'].sum(),
+            'total_costs': df['Costs'].sum(),
+            'total_margin': df['Margin'].sum()
         }
         
-        # Time-based averages (using total sales divided by standard periods)
-        metrics['daily_average'] = metrics['total_sales'] / 30  # Assuming 30 days
-        metrics['monthly_average'] = metrics['total_sales']  # Already monthly data
-        metrics['yearly_projection'] = metrics['monthly_average'] * 12
-        
-        return metrics
-        
+        return df, summary
     except Exception as e:
-        st.error(f"Error calculating metrics: {str(e)}")
-        return None
+        st.error(f"Error loading data: {str(e)}")
+        return None, None
 
 def main():
     st.title("🍸 Pris Bar Advanced Analytics Dashboard")
 
-    df = load_and_clean_data()
-    if df is None:
+    # Load data
+    df, summary = load_and_process_data()
+    if df is None or summary is None:
         return
 
-    metrics = calculate_metrics(df)
-    if metrics is None:
-        return
+    # Calculate key metrics
+    daily_average = summary['total_sales'] / 30  # Assuming 30 days per month
+    avg_transaction = summary['total_sales'] / summary['total_transactions']
+    margin_percentage = (summary['total_margin'] / summary['total_sales']) * 100
 
-    # Key Metrics Section
+    # Key Performance Metrics
     st.header("Key Performance Metrics")
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
         st.metric(
             "Total Revenue",
-            f"${metrics['total_sales']:,.2f}",
-            f"${metrics['daily_average']:,.2f}/day"
+            f"${summary['total_sales']:,.2f}",
+            f"${daily_average:,.2f}/day"
         )
     
     with col2:
         st.metric(
-            "Average Check",
-            f"${metrics['avg_check']:.2f}",
-            f"{metrics['total_receipts']:,} receipts"
+            "Average Transaction",
+            f"${avg_transaction:.2f}",
+            f"{summary['total_transactions']:,} transactions"
         )
     
     with col3:
         st.metric(
-            "Revenue per Cover",
-            f"${metrics['revenue_per_cover']:.2f}",
-            f"{metrics['total_covers']:,} covers"
+            "Total Margin",
+            f"${summary['total_margin']:,.2f}",
+            f"{margin_percentage:.1f}% margin"
         )
     
     with col4:
         st.metric(
-            "Items per Cover",
-            f"{metrics['items_per_cover']:.1f}",
-            f"{metrics['total_receipts']:,} items"
+            "Items Sold",
+            f"{summary['total_quantity']:,}",
+            f"${summary['total_costs']:,.2f} cost"
         )
 
-    # Revenue Analysis Section
-    st.header("Revenue Analysis")
+    # Product Analysis
+    st.header("Product Analysis")
     col1, col2 = st.columns(2)
     
     with col1:
-        st.subheader("Average Revenue")
-        avg_metrics = {
-            "Daily Average": f"${metrics['daily_average']:,.2f}",
-            "Monthly Total": f"${metrics['monthly_average']:,.2f}",
-            "Yearly Projection": f"${metrics['yearly_projection']:,.2f}"
-        }
-        
-        for metric, value in avg_metrics.items():
-            st.metric(metric, value)
+        # Top 10 products by revenue
+        top_products = df.nlargest(10, 'Total Amount')
+        fig_revenue = px.bar(
+            top_products,
+            x='SKU',
+            y='Total Amount',
+            title="Top 10 Products by Revenue"
+        )
+        fig_revenue.update_layout(xaxis_title="Product", yaxis_title="Revenue ($)")
+        st.plotly_chart(fig_revenue, use_container_width=True)
     
     with col2:
-        st.subheader("Key Insights")
-        # Top performing items by revenue
-        top_items = df.nlargest(5, 'Total sales')
-        st.write("Top 5 Revenue Generators:")
-        for idx, row in top_items.iterrows():
-            st.write(f"• {row['Order type']}: ${row['Total sales']:,.2f}")
+        # Top 10 products by margin
+        top_margin = df.nlargest(10, 'Margin')
+        fig_margin = px.bar(
+            top_margin,
+            x='SKU',
+            y='Margin',
+            title="Top 10 Products by Margin"
+        )
+        fig_margin.update_layout(xaxis_title="Product", yaxis_title="Margin ($)")
+        st.plotly_chart(fig_margin, use_container_width=True)
 
-    # Sales Distribution
-    st.header("Sales Distribution")
+    # Key Insights
+    st.header("Key Insights")
     col1, col2 = st.columns(2)
     
     with col1:
-        order_type_data = df.groupby('Order type')['Total sales'].sum().nlargest(5)
-        fig = px.pie(
-            values=order_type_data.values,
-            names=order_type_data.index,
-            title="Top 5 Categories by Revenue"
-        )
-        fig.update_traces(textposition='inside', textinfo='percent+label')
-        st.plotly_chart(fig, use_container_width=True)
+        st.subheader("Top Performers")
+        top_performer = df.loc[df['Total Amount'].idxmax()]
+        st.write(f"• Best selling product: {top_performer['SKU']}")
+        st.write(f"• Highest revenue: ${top_performer['Total Amount']:,.2f}")
+        st.write(f"• Best margin: ${df['Margin'].max():,.2f}")
+        st.write(f"• Most transactions: {df['Total Transactions'].max():,}")
     
     with col2:
-        # Monthly trend (if date data is available)
-        monthly_trend = px.bar(
-            df.groupby('Order type')['Total sales'].sum().nlargest(5).reset_index(),
-            x='Order type',
-            y='Total sales',
-            title="Top 5 Categories Revenue Breakdown"
-        )
-        monthly_trend.update_layout(xaxis_title="Category", yaxis_title="Revenue ($)")
-        st.plotly_chart(monthly_trend, use_container_width=True)
+        st.subheader("Sales Summary")
+        st.write(f"• Daily average sales: ${daily_average:,.2f}")
+        st.write(f"• Average transaction value: ${avg_transaction:.2f}")
+        st.write(f"• Total items sold: {summary['total_quantity']:,}")
+        st.write(f"• Total cost of goods: ${summary['total_costs']:,.2f}")
 
-    # Business Insights Section
-    st.header("Business Insights")
+    # Efficiency Metrics
+    st.header("Efficiency Metrics")
     cols = st.columns(3)
     
     with cols[0]:
-        st.subheader("Top Performers")
-        st.write("Highest Revenue Day:")
-        st.write("Most Popular Item:")
-        st.write("Best Performing Category:")
+        st.metric(
+            "Cost of Goods %",
+            f"{(summary['total_costs'] / summary['total_sales'] * 100):.1f}%"
+        )
     
     with cols[1]:
-        st.subheader("Customer Behavior")
-        st.write(f"Average Check Size: ${metrics['avg_check']:.2f}")
-        st.write(f"Typical Items per Visit: {metrics['items_per_cover']:.1f}")
-        st.write(f"Total Customer Visits: {metrics['total_covers']:,}")
+        st.metric(
+            "Margin per Transaction",
+            f"${summary['total_margin'] / summary['total_transactions']:.2f}"
+        )
     
     with cols[2]:
-        st.subheader("Operational Metrics")
-        st.write(f"Daily Revenue Target: ${metrics['daily_average']:,.2f}")
-        st.write(f"Monthly Revenue Target: ${metrics['monthly_average']:,.2f}")
-        st.write("Peak Hours: Coming soon")
+        st.metric(
+            "Revenue per Item",
+            f"${summary['total_sales'] / summary['total_quantity']:.2f}"
+        )
 
 if __name__ == "__main__":
     main()
