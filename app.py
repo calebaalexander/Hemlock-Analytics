@@ -12,42 +12,50 @@ st.set_page_config(
 )
 
 def load_and_process_data():
-    """Load and process the Pine Excel data with correct column names"""
+    """Load and process the Pine Excel data with exact column names"""
     try:
-        # Read the Excel file
+        # Debug: Print available columns
         df = pd.read_excel('Pine.xlsx', sheet_name='2023 Product Breakdown')
+        st.write("Available columns:", df.columns.tolist())
         
-        # Convert columns to numeric - using exact column names from Excel
-        numeric_cols = ['Total Amount', 'Total Quanti', 'Total Trans', 'Margin', 'Costs']
+        # Convert numeric columns - using exact column names
+        numeric_cols = [
+            'Total Amount', 
+            'Total Quantity',
+            'Total Trans',
+            'Costs',
+            'Margin'
+        ]
+        
         for col in numeric_cols:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+            else:
+                st.error(f"Missing column: {col}")
         
         # Calculate summary metrics
         summary = {
             'total_sales': df['Total Amount'].sum(),
-            'total_quantity': df['Total Quanti'].sum(),
+            'total_quantity': df['Total Quantity'].sum(),
             'total_transactions': df['Total Trans'].sum(),
             'total_costs': df['Costs'].sum(),
             'total_margin': df['Margin'].sum()
         }
         
         return df, summary
+        
     except Exception as e:
         st.error(f"Error loading data: {str(e)}")
+        st.write("Error details:", type(e).__name__, str(e))
         return None, None
 
 def main():
     st.title("🍸 Pris Bar Advanced Analytics Dashboard")
 
-    # Load data
+    # Load data with debug info
     df, summary = load_and_process_data()
     if df is None or summary is None:
         return
-
-    # Calculate key metrics
-    daily_average = summary['total_sales'] / 30  # Assuming 30 days per month
-    avg_transaction = summary['total_sales'] / summary['total_transactions']
-    margin_percentage = (summary['total_margin'] / summary['total_sales']) * 100
 
     # Key Performance Metrics
     st.header("Key Performance Metrics")
@@ -57,13 +65,13 @@ def main():
         st.metric(
             "Total Revenue",
             f"${summary['total_sales']:,.2f}",
-            f"${daily_average:,.2f}/day"
+            f"${summary['total_sales']/30:,.2f}/day"
         )
     
     with col2:
         st.metric(
             "Average Transaction",
-            f"${avg_transaction:.2f}",
+            f"${summary['total_sales']/summary['total_transactions']:.2f}",
             f"{summary['total_transactions']:,} transactions"
         )
     
@@ -71,7 +79,7 @@ def main():
         st.metric(
             "Total Margin",
             f"${summary['total_margin']:,.2f}",
-            f"{margin_percentage:.1f}% margin"
+            f"{(summary['total_margin']/summary['total_sales']*100):.1f}% margin"
         )
     
     with col4:
@@ -109,46 +117,24 @@ def main():
         fig_margin.update_layout(xaxis_title="Product", yaxis_title="Margin ($)")
         st.plotly_chart(fig_margin, use_container_width=True)
 
-    # Key Insights
-    st.header("Key Insights")
+    # Sales Summary
+    st.header("Sales Summary")
     col1, col2 = st.columns(2)
     
     with col1:
-        st.subheader("Top Performers")
-        top_performer = df.loc[df['Total Amount'].idxmax()]
-        st.write(f"• Best selling product: {top_performer['SKU']}")
-        st.write(f"• Highest revenue: ${top_performer['Total Amount']:,.2f}")
+        st.subheader("Top Products")
+        top_seller = df.loc[df['Total Amount'].idxmax()]
+        st.write(f"• Best selling product: {top_seller['SKU']}")
+        st.write(f"• Highest revenue: ${top_seller['Total Amount']:,.2f}")
         st.write(f"• Best margin: ${df['Margin'].max():,.2f}")
         st.write(f"• Most transactions: {df['Total Trans'].max():,}")
     
     with col2:
-        st.subheader("Sales Summary")
-        st.write(f"• Daily average sales: ${daily_average:,.2f}")
-        st.write(f"• Average transaction value: ${avg_transaction:.2f}")
-        st.write(f"• Total items sold: {summary['total_quantity']:,}")
-        st.write(f"• Total cost of goods: ${summary['total_costs']:,.2f}")
-
-    # Efficiency Metrics
-    st.header("Efficiency Metrics")
-    cols = st.columns(3)
-    
-    with cols[0]:
-        st.metric(
-            "Cost of Goods %",
-            f"{(summary['total_costs'] / summary['total_sales'] * 100):.1f}%"
-        )
-    
-    with cols[1]:
-        st.metric(
-            "Margin per Transaction",
-            f"${summary['total_margin'] / summary['total_transactions']:.2f}"
-        )
-    
-    with cols[2]:
-        st.metric(
-            "Revenue per Item",
-            f"${summary['total_sales'] / summary['total_quantity']:.2f}"
-        )
+        st.subheader("Efficiency Metrics")
+        st.write(f"• Cost of Goods: {(summary['total_costs']/summary['total_sales']*100):.1f}%")
+        st.write(f"• Margin per Transaction: ${summary['total_margin']/summary['total_transactions']:.2f}")
+        st.write(f"• Revenue per Item: ${summary['total_sales']/summary['total_quantity']:.2f}")
+        st.write(f"• Average Items per Transaction: {summary['total_quantity']/summary['total_transactions']:.1f}")
 
 if __name__ == "__main__":
     main()
