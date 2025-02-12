@@ -56,17 +56,17 @@ def load_sales_data():
         df = pd.read_excel('Hemlock2023.xlsx')
         df = df[df['Order type'].notna()]
         
-        numeric_cols = ['Total sales', 'Covers', 'Receipts', 'Total Amount', 'Costs', 'Margin']
+        numeric_cols = ['Total sales', 'Covers', 'Receipts', 'Costs']
         for col in numeric_cols:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors='coerce')
         
         summary = {
-            'total_sales': df['Total Amount'].sum(),
+            'total_sales': df['Total sales'].sum(),
             'total_covers': df['Covers'].sum(),
             'total_receipts': df['Receipts'].sum(),
-            'avg_check': df['Total Amount'].sum() / df['Receipts'].sum(),
-            'revenue_per_cover': df['Total Amount'].sum() / df['Covers'].sum()
+            'avg_check': df['Total sales'].sum() / df['Receipts'].sum(),
+            'revenue_per_cover': df['Total sales'].sum() / df['Covers'].sum()
         }
         
         return df, summary
@@ -77,15 +77,15 @@ def load_sales_data():
 def analyze_cocktails(df):
     cocktail_data = df[df['SKU'].notna()]
     
-    top_cocktails = cocktail_data.nlargest(10, 'Total Amount')[
-        ['SKU', 'Total Amount', 'Total Quantity', 'Margin']
+    top_cocktails = cocktail_data.nlargest(10, 'Total sales')[
+        ['SKU', 'Total sales', 'Total Quantity', 'Costs']
     ]
     
     margin_data = pd.DataFrame({
         'SKU': cocktail_data['SKU'],
-        'Margin': cocktail_data['Margin'],
+        'Revenue': cocktail_data['Total sales'],
         'Cost': cocktail_data['Costs'],
-        'Revenue': cocktail_data['Total Amount']
+        'Margin': (cocktail_data['Total sales'] - cocktail_data['Costs']) / cocktail_data['Total sales'] * 100
     })
     
     return top_cocktails, margin_data
@@ -122,11 +122,10 @@ def analyze_inventory(df):
     inventory = df.groupby('SKU').agg({
         'Total Quantity': 'sum',
         'Costs': 'sum',
-        'Total Amount': 'sum',
-        'Margin': 'mean'
+        'Total sales': 'sum'
     }).reset_index()
     
-    inventory['Margin_Percentage'] = (inventory['Total Amount'] - inventory['Costs']) / inventory['Total Amount'] * 100
+    inventory['Margin_Percentage'] = (inventory['Total sales'] - inventory['Costs']) / inventory['Total sales'] * 100
     
     return inventory
 
@@ -193,7 +192,7 @@ def main():
         fig_top = px.bar(
             top_cocktails,
             x='SKU',
-            y='Total Amount',
+            y='Total sales',
             title="Top 10 Cocktails by Revenue"
         )
         st.plotly_chart(fig_top, use_container_width=True)
@@ -226,16 +225,16 @@ def main():
             inventory,
             x='Total Quantity',
             y='Margin_Percentage',
-            hover_data=['SKU', 'Total Amount'],
+            hover_data=['SKU', 'Total sales'],
             title="Product Movement vs Margin"
         )
         st.plotly_chart(fig_inventory, use_container_width=True)
         
         st.dataframe(
-            inventory.sort_values('Total Amount', ascending=False)
+            inventory.sort_values('Total sales', ascending=False)
             .head(10)
             .style.format({
-                'Total Amount': '${:,.2f}',
+                'Total sales': '${:,.2f}',
                 'Costs': '${:,.2f}',
                 'Margin_Percentage': '{:.1f}%'
             })
