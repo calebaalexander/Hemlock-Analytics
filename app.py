@@ -5,69 +5,95 @@ import plotly.graph_objects as go
 import numpy as np
 
 st.set_page_config(
-    page_title="Pris Bar Analytics",
+    page_title="Pine Bar Analytics",
     page_icon="🍸",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
 
-def clean_numeric_data(df, column):
-    """Clean numeric data by removing any non-numeric characters"""
-    if column in df.columns:
-        df[column] = pd.to_numeric(df[column], errors='coerce')
-    return df
+def calculate_net_metrics(row):
+    """Calculate net metrics considering all transaction types"""
+    # Net amount = Transaction Amount (already includes discounts) - Loss Amount - Returned Amount
+    net_amount = (row['Transaction Amount'] or 0) - (row['Loss Amount'] or 0) - (row['Returned Amount'] or 0)
+    
+    # Net quantity = Transaction Quantity - Loss Quantity - Returned Quantity
+    net_quantity = (row['Transaction Quantity'] or 0) - (row['Loss Quantity'] or 0) - (row['Returned Quantity'] or 0)
+    
+    # Net transactions = Transaction Count - Loss Transaction Count - Returned Transaction Count
+    net_transactions = (row['Transaction Count'] or 0) - (row['Loss Transaction Count'] or 0) - (row['Returned Transaction Count'] or 0)
+    
+    return pd.Series({
+        'Net Amount': net_amount,
+        'Net Quantity': net_quantity,
+        'Net Transactions': net_transactions
+    })
 
 def load_and_process_data():
-    """Load and process data with accurate calculations"""
+    """Load and process data with proper handling of transaction types"""
     try:
         df = pd.read_excel('Pine.xlsx', sheet_name='2023 Product Breakdown')
         
-        # Clean numeric columns
-        numeric_columns = [
-            'Total Amount',
-            'Total Quantity',
-            'Total Transaction Count',
-            'Margin',
-            'Costs'
-        ]
+        # Calculate net metrics
+        net_metrics = df.apply(calculate_net_metrics, axis=1)
+        df = pd.concat([df, net_metrics], axis=1)
         
-        for col in numeric_columns:
-            df = clean_numeric_data(df, col)
+        # Filter out categories (rows without SKUs) and remove rows with zero or negative net amounts
+        product_df = df[df['SKU'].notna() & (df['Net Amount'] > 0)].copy()
         
-        # Filter out rows with NaN values
-        df = df.dropna(subset=['Total Amount', 'Total Quantity', 'Total Transaction Count'])
+        # Calculate category totals
+        category_df = df[df['SKU'].isna()].copy()
         
         # Calculate summary metrics
         summary = {
-            'total_sales': df['Total Amount'].sum(),
-            'total_quantity': df['Total Quantity'].sum(),
-            'total_transactions': df['Total Transaction Count'].sum(),
-            'total_costs': df['Costs'].sum() if 'Costs' in df.columns else 0,
-            'total_margin': df['Margin'].sum() if 'Margin' in df.columns else 0
+            'total_net_sales': df['Net Amount'].sum(),
+            'total_net_quantity': df['Net Quantity'].sum(),
+            'total_net_transactions': df['Net Transactions'].sum(),
+            'total_discounted_amount': abs(df['Discounted Amount'].sum()),
+            'total_loss_amount': abs(df['Loss Amount'].sum())
         }
         
         # Calculate derived metrics
-        summary['avg_transaction'] = summary['total_sales'] / summary['total_transactions']
-        summary['daily_average'] = summary['total_sales'] / 30  # Assuming 30 days
-        summary['margin_percentage'] = (summary['total_margin'] / summary['total_sales'] * 100) if summary['total_sales'] > 0 else 0
-        summary['revenue_per_item'] = summary['total_sales'] / summary['total_quantity']
-        summary['items_per_transaction'] = summary['total_quantity'] / summary['total_transactions']
+        summary['avg_transaction'] = (summary['total_net_sales'] / summary['total_net_transactions'] 
+                                    if summary['total_net_transactions'] > 0 else 0)
+        summary['daily_average'] = summary['total_net_sales'] / 365  # Annual average
         
-        return df, summary
+        return product_df, category_df, summary
         
     except Exception as e:
         st.error(f"Error loading data: {str(e)}")
-        return None, None
+        return None, None, None
 
 def format_currency(value):
-    """Format currency values consistently"""
-    return f"${value:,.2f}"
+    """Format currency values with validation"""
+    try:
+        return f"${abs(float(value)):,.2f}"
+    except:
+        return "$0.00"
+
+def create_bar_chart(df, x_col, y_col, title, color=None):
+    """Create a consistent bar chart with improved formatting"""
+    fig = px.bar(
+        df,
+        x=x_col,
+        y=y_col,
+        title=title,
+        color=color,
+        color_discrete_sequence=['#2E86C1'] if not color else None
+    )
+    fig.update_layout(
+        xaxis_title="Product",
+        yaxis_title=f"{y_col} ($)" if 'Amount' in y_col else y_col,
+        height=400,
+        xaxis_tickangle=-45,
+        margin=dict(t=50, l=50, r=20, b=100)
+    )
+    return fig
 
 def main():
-    st.title("🍸 Pris Bar Advanced Analytics Dashboard")
-
-    df, summary = load_and_process_data()
-    if df is None or summary is None:
+    st.title("🍸 Pine Bar Advanced Analytics Dashboard")
+    
+    product_df, category_df, summary = load_and_process_data()
+    if product_df is None or category_df is None or summary is None:
         return
 
     # Key Performance Metrics
@@ -76,90 +102,97 @@ def main():
     
     with col1:
         st.metric(
-            "Total Revenue",
-            format_currency(summary['total_sales']),
-            format_currency(summary['daily_average']) + "/day"
+            "Total Net Revenue",
+            format_currency(summary['total_net_sales']),
+            f"{format_currency(summary['daily_average'])}/day"
         )
     
     with col2:
         st.metric(
             "Average Transaction",
             format_currency(summary['avg_transaction']),
-            f"{summary['total_transactions']:,.0f} transactions"
+            f"{summary['total_net_transactions']:,.0f} transactions"
         )
     
     with col3:
         st.metric(
-            "Total Margin",
-            format_currency(summary['total_margin']),
-            f"{summary['margin_percentage']:.1f}% margin"
+            "Total Discounts",
+            format_currency(summary['total_discounted_amount']),
+            f"{(summary['total_discounted_amount']/summary['total_net_sales']*100):.1f}% of sales"
         )
     
     with col4:
         st.metric(
-            "Items Sold",
-            f"{summary['total_quantity']:,.0f}",
-            format_currency(summary['total_costs']) + " cost"
+            "Items Sold (Net)",
+            f"{summary['total_net_quantity']:,.0f}",
+            f"{format_currency(summary['total_loss_amount'])} in losses"
         )
 
+    # Category Analysis
+    st.header("Category Performance")
+    
+    # Filter and sort categories
+    category_totals = category_df[category_df['Net Amount'] > 0].sort_values('Net Amount', ascending=False)
+    
+    fig_categories = px.bar(
+        category_totals,
+        x=category_totals.index,
+        y='Net Amount',
+        title="Revenue by Category",
+        color_discrete_sequence=['#2E86C1']
+    )
+    fig_categories.update_layout(
+        xaxis_title="Category",
+        yaxis_title="Net Revenue ($)",
+        height=400
+    )
+    st.plotly_chart(fig_categories, use_container_width=True)
+
     # Product Analysis
-    st.header("Product Analysis")
+    st.header("Top Products")
     col1, col2 = st.columns(2)
     
     with col1:
-        # Top 10 by revenue
-        top_revenue = df.nlargest(10, 'Total Amount')
-        fig_revenue = px.bar(
-            top_revenue,
-            x='SKU',
-            y='Total Amount',
-            title="Top 10 Products by Revenue"
-        )
-        fig_revenue.update_layout(
-            xaxis_title="Product",
-            yaxis_title="Revenue ($)",
-            height=400
+        top_revenue = product_df.nlargest(10, 'Net Amount')
+        fig_revenue = create_bar_chart(
+            top_revenue, 
+            'SKU', 
+            'Net Amount',
+            "Top 10 Products by Revenue"
         )
         st.plotly_chart(fig_revenue, use_container_width=True)
     
     with col2:
-        # Top 10 by margin
-        top_margin = df.nlargest(10, 'Margin')
-        fig_margin = px.bar(
-            top_margin,
-            x='SKU',
-            y='Margin',
-            title="Top 10 Products by Margin"
+        top_quantity = product_df.nlargest(10, 'Net Quantity')
+        fig_quantity = create_bar_chart(
+            top_quantity,
+            'SKU',
+            'Net Quantity',
+            "Top 10 Products by Quantity Sold"
         )
-        fig_margin.update_layout(
-            xaxis_title="Product",
-            yaxis_title="Margin ($)",
-            height=400
-        )
-        st.plotly_chart(fig_margin, use_container_width=True)
+        st.plotly_chart(fig_quantity, use_container_width=True)
 
-    # Sales Summary
-    st.header("Sales Summary")
+    # Transaction Analysis
+    st.header("Transaction Insights")
     col1, col2 = st.columns(2)
     
     with col1:
-        st.subheader("Top Products")
-        # Find top performers
-        top_revenue_product = df.loc[df['Total Amount'].idxmax()]
-        top_margin_product = df.loc[df['Margin'].idxmax()]
-        top_transaction_product = df.loc[df['Total Transaction Count'].idxmax()]
+        st.subheader("Top Performers")
+        top_revenue_product = product_df.loc[product_df['Net Amount'].idxmax()]
+        st.write(f"• Most Revenue: {top_revenue_product['SKU']}")
+        st.write(f"  Revenue: {format_currency(top_revenue_product['Net Amount'])}")
+        st.write(f"  Quantity: {int(top_revenue_product['Net Quantity']):,} units")
         
-        st.write(f"• Best selling product: {top_revenue_product['SKU']}")
-        st.write(f"• Highest revenue: {format_currency(top_revenue_product['Total Amount'])}")
-        st.write(f"• Best margin: {format_currency(top_margin_product['Margin'])}")
-        st.write(f"• Most transactions: {int(top_transaction_product['Total Transaction Count']):,}")
+        top_transaction_product = product_df.loc[product_df['Net Transactions'].idxmax()]
+        st.write(f"• Most Frequent: {top_transaction_product['SKU']}")
+        st.write(f"  Transactions: {int(top_transaction_product['Net Transactions']):,}")
     
     with col2:
-        st.subheader("Efficiency Metrics")
-        st.write(f"• Cost of Goods: {(summary['total_costs']/summary['total_sales']*100 if summary['total_sales']>0 else 0):.1f}%")
-        st.write(f"• Margin per Transaction: {format_currency(summary['total_margin']/summary['total_transactions'])}")
-        st.write(f"• Revenue per Item: {format_currency(summary['revenue_per_item'])}")
-        st.write(f"• Average Items per Transaction: {summary['items_per_transaction']:.1f}")
+        st.subheader("Sales Metrics")
+        st.write(f"• Average Transaction Value: {format_currency(summary['avg_transaction'])}")
+        st.write(f"• Daily Revenue: {format_currency(summary['daily_average'])}")
+        st.write(f"• Discount Rate: {(summary['total_discounted_amount']/summary['total_net_sales']*100):.1f}%")
+        st.write(f"• Loss Rate: {(summary['total_loss_amount']/summary['total_net_sales']*100):.1f}%")
 
 if __name__ == "__main__":
     main()
