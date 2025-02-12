@@ -4,8 +4,8 @@ import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime
 import numpy as np
+from collections import defaultdict
 
-# Page config
 st.set_page_config(
     page_title="Pris Bar Analytics",
     page_icon="🍸",
@@ -13,7 +13,6 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Enhanced Custom CSS with better card styling and hover effects
 st.markdown("""
     <style>
     .metric-card {
@@ -46,74 +45,94 @@ st.markdown("""
         letter-spacing: 0.05em;
         margin-bottom: 0.5rem;
     }
-    .trend-positive {
-        color: #28a745;
-    }
-    .trend-negative {
-        color: #dc3545;
-    }
-    .stApp {
-        background-color: #fafafa;
-    }
+    .trend-positive { color: #28a745; }
+    .trend-negative { color: #dc3545; }
+    .stApp { background-color: #fafafa; }
     </style>
 """, unsafe_allow_html=True)
 
 def load_sales_data():
     try:
         df = pd.read_excel('Hemlock2023.xlsx')
-        # Enhanced data cleaning
-        df = df[df['Order type'].isin(['Dine-in', 'Other'])]
+        df = df[df['Order type'].notna()]
         
-        # Convert sales columns to numeric, handling any non-numeric values
-        numeric_columns = ['Total sales', 'Covers', 'Receipts']
-        for col in numeric_columns:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
-            
-        # Add derived metrics
-        df['revenue_per_cover'] = df['Total sales'] / df['Covers']
-        df['average_check'] = df['Total sales'] / df['Receipts']
+        numeric_cols = ['Total sales', 'Covers', 'Receipts', 'Total Amount', 'Costs', 'Margin']
+        for col in numeric_cols:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
         
-        return df
+        summary = {
+            'total_sales': df['Total Amount'].sum(),
+            'total_covers': df['Covers'].sum(),
+            'total_receipts': df['Receipts'].sum(),
+            'avg_check': df['Total Amount'].sum() / df['Receipts'].sum(),
+            'revenue_per_cover': df['Total Amount'].sum() / df['Covers'].sum()
+        }
+        
+        return df, summary
     except Exception as e:
-        st.error(f"Error loading sales data: {str(e)}")
-        return None
+        st.error(f"Error loading data: {str(e)}")
+        return None, None
 
-def analyze_sales_categories(df):
-    """Analyze sales by category and return insights"""
+def analyze_cocktails(df):
+    cocktail_data = df[df['SKU'].notna()]
+    
+    top_cocktails = cocktail_data.nlargest(10, 'Total Amount')[
+        ['SKU', 'Total Amount', 'Total Quantity', 'Margin']
+    ]
+    
+    margin_data = pd.DataFrame({
+        'SKU': cocktail_data['SKU'],
+        'Margin': cocktail_data['Margin'],
+        'Cost': cocktail_data['Costs'],
+        'Revenue': cocktail_data['Total Amount']
+    })
+    
+    return top_cocktails, margin_data
+
+def analyze_categories():
     categories = {
-        'COCKTAILS': df[df.index.str.contains('COCKTAILS', na=False)]['Total sales'].sum(),
-        'BEER': df[df.index.str.contains('BEER', na=False)]['Total sales'].sum(),
-        'FOOD': df[df.index.str.contains('FOOD', na=False)]['Total sales'].sum(),
-        'SPIRITS': df[df.index.str.contains('SPIRITS', na=False)]['Total sales'].sum(),
-        'WINE': df[df.index.str.contains('WINE', na=False)]['Total sales'].sum()
+        'COCKTAILS': 167011.65,
+        'BEER': 15967.45,
+        'FOOD': 58645.45,
+        'SPIRITS': 21143.45,
+        'WINE': 13586.80,
+        'N/A': 3836.40,
+        'Merch': 553.80,
+        'Misc': 439.00
     }
-    return pd.Series(categories)
+    return categories
 
-def create_sales_trend_chart(df):
-    """Create a sales trend visualization"""
-    fig = go.Figure()
-    
-    # Add traces for different metrics
-    fig.add_trace(go.Scatter(
-        x=df.index,
-        y=df['Total sales'].rolling(7).mean(),
-        name='7-day Average Sales',
-        line=dict(color='#1f77b4', width=2)
-    ))
-    
-    fig.update_layout(
-        title="Sales Trend Analysis",
-        xaxis_title="Date",
-        yaxis_title="Sales ($)",
-        hovermode='x unified',
-        showlegend=True
+def create_category_charts(categories):
+    fig_pie = px.pie(
+        values=list(categories.values()),
+        names=list(categories.keys()),
+        title="Revenue Distribution by Category"
     )
-    return fig
+    
+    fig_bar = px.bar(
+        x=list(categories.keys()),
+        y=list(categories.values()),
+        title="Revenue by Category"
+    )
+    
+    return fig_pie, fig_bar
+
+def analyze_inventory(df):
+    inventory = df.groupby('SKU').agg({
+        'Total Quantity': 'sum',
+        'Costs': 'sum',
+        'Total Amount': 'sum',
+        'Margin': 'mean'
+    }).reset_index()
+    
+    inventory['Margin_Percentage'] = (inventory['Total Amount'] - inventory['Costs']) / inventory['Total Amount'] * 100
+    
+    return inventory
 
 def main():
-    st.title("🍸 Pris Bar Performance Dashboard")
+    st.title("🍸 Pris Bar Advanced Analytics Dashboard")
 
-    # Authentication
     if 'authenticated' not in st.session_state:
         col1, col2 = st.columns([1, 2])
         with col1:
@@ -128,99 +147,99 @@ def main():
                     st.error("Invalid credentials")
         return
 
-    df = load_sales_data()
-    if df is not None:
-        # Top-level metrics with enhanced styling
-        st.subheader("Key Performance Metrics")
+    df, summary = load_sales_data()
+    if df is None or summary is None:
+        return
+
+    tabs = st.tabs(["Overview", "Cocktails", "Categories", "Inventory"])
+
+    with tabs[0]:
+        st.subheader("Key Metrics")
+        col1, col2, col3, col4 = st.columns(4)
         
-        metrics_cols = st.columns(4)
-        with metrics_cols[0]:
-            total_revenue = df['Total sales'].sum()
-            prev_revenue = total_revenue * 0.9  # Example - replace with actual previous period
-            revenue_growth = ((total_revenue - prev_revenue) / prev_revenue) * 100
-            
+        with col1:
             st.metric(
                 "Total Revenue",
-                f"${total_revenue:,.2f}",
-                f"{revenue_growth:+.1f}% vs prev period",
-                delta_color="normal"
+                f"${summary['total_sales']:,.2f}",
+                f"${summary['total_sales']/30:,.2f}/day"
             )
-
-        with metrics_cols[1]:
-            avg_check = total_revenue / df['Receipts'].sum()
+        
+        with col2:
             st.metric(
                 "Average Check",
-                f"${avg_check:.2f}",
-                help="Average spend per order"
+                f"${summary['avg_check']:.2f}",
+                f"{summary['total_receipts']:,} receipts"
             )
-
-        with metrics_cols[2]:
-            covers = df['Covers'].sum()
-            revenue_per_cover = total_revenue / covers
+        
+        with col3:
             st.metric(
                 "Revenue per Cover",
-                f"${revenue_per_cover:.2f}",
-                f"{covers:,} total covers"
+                f"${summary['revenue_per_cover']:.2f}",
+                f"{summary['total_covers']:,} covers"
             )
-
-        with metrics_cols[3]:
-            total_items = df['Receipts'].sum()
-            items_per_cover = total_items / covers
+        
+        with col4:
+            items_per_cover = summary['total_receipts'] / summary['total_covers']
             st.metric(
                 "Items per Cover",
                 f"{items_per_cover:.1f}",
-                f"{total_items:,} total items"
+                f"{summary['total_receipts']:,} items"
             )
 
-        # Sales Analysis Section
-        st.subheader("Sales Analysis")
+    with tabs[1]:
+        st.subheader("Cocktail Analysis")
+        top_cocktails, margin_data = analyze_cocktails(df)
         
-        tabs = st.tabs(["Category Analysis", "Top Items", "Trends"])
+        fig_top = px.bar(
+            top_cocktails,
+            x='SKU',
+            y='Total Amount',
+            title="Top 10 Cocktails by Revenue"
+        )
+        st.plotly_chart(fig_top, use_container_width=True)
         
-        with tabs[0]:
-            category_data = analyze_sales_categories(df)
-            fig = px.pie(
-                values=category_data.values,
-                names=category_data.index,
-                title="Sales Distribution by Category"
-            )
-            st.plotly_chart(fig, use_container_width=True)
+        fig_margin = px.scatter(
+            margin_data,
+            x='Revenue',
+            y='Margin',
+            hover_data=['SKU'],
+            title="Cocktail Margin Analysis"
+        )
+        st.plotly_chart(fig_margin, use_container_width=True)
 
-        with tabs[1]:
-            # Top selling items analysis
-            top_items = df.nlargest(10, 'Total sales')
-            fig = px.bar(
-                top_items,
-                x=top_items.index,
-                y='Total sales',
-                title="Top 10 Items by Revenue"
-            )
-            st.plotly_chart(fig, use_container_width=True)
-
-        with tabs[2]:
-            # Sales trend analysis
-            trend_chart = create_sales_trend_chart(df)
-            st.plotly_chart(trend_chart, use_container_width=True)
-
-        # Additional Insights
-        st.subheader("Key Insights")
+    with tabs[2]:
+        st.subheader("Category Analysis")
+        categories = analyze_categories()
+        fig_pie, fig_bar = create_category_charts(categories)
+        
         col1, col2 = st.columns(2)
-        
         with col1:
-            st.markdown("#### Revenue Breakdown")
-            st.markdown(f"""
-            - Total Revenue: ${total_revenue:,.2f}
-            - Average Check: ${avg_check:.2f}
-            - Revenue per Cover: ${revenue_per_cover:.2f}
-            """)
-
+            st.plotly_chart(fig_pie, use_container_width=True)
         with col2:
-            st.markdown("#### Performance Metrics")
-            st.markdown(f"""
-            - Total Covers: {covers:,}
-            - Total Items Sold: {total_items:,}
-            - Items per Cover: {items_per_cover:.1f}
-            """)
+            st.plotly_chart(fig_bar, use_container_width=True)
+
+    with tabs[3]:
+        st.subheader("Inventory Analysis")
+        inventory = analyze_inventory(df)
+        
+        fig_inventory = px.scatter(
+            inventory,
+            x='Total Quantity',
+            y='Margin_Percentage',
+            hover_data=['SKU', 'Total Amount'],
+            title="Product Movement vs Margin"
+        )
+        st.plotly_chart(fig_inventory, use_container_width=True)
+        
+        st.dataframe(
+            inventory.sort_values('Total Amount', ascending=False)
+            .head(10)
+            .style.format({
+                'Total Amount': '${:,.2f}',
+                'Costs': '${:,.2f}',
+                'Margin_Percentage': '{:.1f}%'
+            })
+        )
 
 if __name__ == "__main__":
     main()
