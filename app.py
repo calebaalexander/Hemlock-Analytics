@@ -14,30 +14,29 @@ st.set_page_config(
 def load_and_process_data():
     """Load and process the Pine Excel data with exact column names"""
     try:
-        # Debug: Print available columns
+        # Read the Excel file
         df = pd.read_excel('Pine.xlsx', sheet_name='2023 Product Breakdown')
-        st.write("Available columns:", df.columns.tolist())
         
-        # Convert numeric columns - using exact column names
+        # Convert numeric columns - using exact column names from Excel
         numeric_cols = [
-            'Total Amount', 
+            'Total Amount',
             'Total Quantity',
-            'Total Trans',
-            'Costs',
-            'Margin'
+            'Total Transaction Count',
+            'Transaction Amount',
+            'Transaction Count',
+            'Margin',
+            'Costs'
         ]
         
         for col in numeric_cols:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors='coerce')
-            else:
-                st.error(f"Missing column: {col}")
         
         # Calculate summary metrics
         summary = {
             'total_sales': df['Total Amount'].sum(),
             'total_quantity': df['Total Quantity'].sum(),
-            'total_transactions': df['Total Trans'].sum(),
+            'total_transactions': df['Total Transaction Count'].sum(),
             'total_costs': df['Costs'].sum(),
             'total_margin': df['Margin'].sum()
         }
@@ -46,13 +45,12 @@ def load_and_process_data():
         
     except Exception as e:
         st.error(f"Error loading data: {str(e)}")
-        st.write("Error details:", type(e).__name__, str(e))
         return None, None
 
 def main():
     st.title("🍸 Pris Bar Advanced Analytics Dashboard")
 
-    # Load data with debug info
+    # Load data
     df, summary = load_and_process_data()
     if df is None or summary is None:
         return
@@ -127,7 +125,7 @@ def main():
         st.write(f"• Best selling product: {top_seller['SKU']}")
         st.write(f"• Highest revenue: ${top_seller['Total Amount']:,.2f}")
         st.write(f"• Best margin: ${df['Margin'].max():,.2f}")
-        st.write(f"• Most transactions: {df['Total Trans'].max():,}")
+        st.write(f"• Most transactions: {df['Total Transaction Count'].max():,}")
     
     with col2:
         st.subheader("Efficiency Metrics")
