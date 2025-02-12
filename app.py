@@ -3,47 +3,27 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import numpy as np
+from datetime import datetime
 
 st.set_page_config(
     page_title="Pris Bar Analytics",
     page_icon="🍸",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
-
-def clean_numeric_column(df, column):
-    """Clean numeric columns by removing currency symbols and converting to float"""
-    if column in df.columns:
-        df[column] = df[column].apply(lambda x: str(x).replace('$', '').replace(',', '') if pd.notnull(x) else x)
-        df[column] = pd.to_numeric(df[column], errors='coerce')
-    return df
 
 def load_and_clean_data():
     """Load and clean the Excel data"""
     try:
-        # Read the Excel file
         df = pd.read_excel('Hemlock2023.xlsx')
-        
-        # Store original row count
-        original_rows = len(df)
         
         # Clean numeric columns
         numeric_columns = ['Total sales', 'Covers', 'Receipts', 'USD/cover', 'USD/receipt']
         for col in numeric_columns:
-            df = clean_numeric_column(df, col)
+            df[col] = pd.to_numeric(df[col], errors='coerce')
         
-        # Remove rows where all numeric columns are NaN
-        df = df.dropna(subset=numeric_columns, how='all')
-        
-        # Remove summary rows and keep only meaningful data
+        # Basic cleaning
         df = df[df['Order type'].notna()]
-        
-        # Log cleaning results
-        st.sidebar.markdown("### Data Cleaning Report")
-        st.sidebar.markdown(f"Original rows: {original_rows}")
-        st.sidebar.markdown(f"Cleaned rows: {len(df)}")
-        st.sidebar.markdown(f"Rows removed: {original_rows - len(df)}")
-        
         return df
         
     except Exception as e:
@@ -51,30 +31,22 @@ def load_and_clean_data():
         return None
 
 def calculate_metrics(df):
-    """Calculate key metrics from cleaned data"""
+    """Calculate key metrics and insights"""
     try:
-        # Filter out negative values for calculations
-        calc_df = df[df['Total sales'] >= 0]
-        
         metrics = {
-            'total_sales': calc_df['Total sales'].sum(),
-            'total_covers': calc_df['Covers'].sum(),
-            'total_receipts': calc_df['Receipts'].sum()
+            'total_sales': df['Total sales'].sum(),
+            'avg_check': df['Total sales'].sum() / df['Receipts'].sum(),
+            'revenue_per_cover': df['Total sales'].sum() / df['Covers'].sum(),
+            'items_per_cover': df['Receipts'].sum() / df['Covers'].sum(),
+            'total_covers': df['Covers'].sum(),
+            'total_receipts': df['Receipts'].sum()
         }
         
-        # Calculate derived metrics
-        if metrics['total_receipts'] > 0:
-            metrics['avg_check'] = metrics['total_sales'] / metrics['total_receipts']
-        else:
-            metrics['avg_check'] = 0
-            
-        if metrics['total_covers'] > 0:
-            metrics['revenue_per_cover'] = metrics['total_sales'] / metrics['total_covers']
-            metrics['items_per_cover'] = metrics['total_receipts'] / metrics['total_covers']
-        else:
-            metrics['revenue_per_cover'] = 0
-            metrics['items_per_cover'] = 0
-            
+        # Time-based averages (using total sales divided by standard periods)
+        metrics['daily_average'] = metrics['total_sales'] / 30  # Assuming 30 days
+        metrics['monthly_average'] = metrics['total_sales']  # Already monthly data
+        metrics['yearly_projection'] = metrics['monthly_average'] * 12
+        
         return metrics
         
     except Exception as e:
@@ -83,52 +55,24 @@ def calculate_metrics(df):
 
 def main():
     st.title("🍸 Pris Bar Advanced Analytics Dashboard")
-    
-    # Sidebar controls
-    st.sidebar.title("Dashboard Settings")
-    show_raw_data = st.sidebar.checkbox("Show Raw Data")
-    show_data_quality = st.sidebar.checkbox("Show Data Quality Metrics")
 
-    # Load and clean data
     df = load_and_clean_data()
     if df is None:
-        st.error("Failed to load data. Please check the Excel file.")
         return
 
-    # Calculate metrics
     metrics = calculate_metrics(df)
     if metrics is None:
-        st.error("Failed to calculate metrics.")
         return
 
-    # Display data quality information if enabled
-    if show_data_quality:
-        st.subheader("Data Quality Metrics")
-        
-        # Missing values summary
-        missing_data = df.isnull().sum()
-        st.write("Missing Values by Column:")
-        st.dataframe(missing_data[missing_data > 0])
-        
-        # Numeric columns statistics
-        numeric_stats = df.describe()
-        st.write("Numeric Columns Statistics:")
-        st.dataframe(numeric_stats)
-
-    # Display raw data if enabled
-    if show_raw_data:
-        st.subheader("Raw Data")
-        st.dataframe(df)
-
-    # Main metrics display
-    st.subheader("Key Metrics")
+    # Key Metrics Section
+    st.header("Key Performance Metrics")
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
         st.metric(
             "Total Revenue",
             f"${metrics['total_sales']:,.2f}",
-            f"${metrics['total_sales']/30:,.2f}/day"
+            f"${metrics['daily_average']:,.2f}/day"
         )
     
     with col2:
@@ -152,17 +96,75 @@ def main():
             f"{metrics['total_receipts']:,} items"
         )
 
-    # Category analysis (if data is available)
-    if 'Order type' in df.columns:
-        st.subheader("Sales by Order Type")
-        order_type_data = df.groupby('Order type')['Total sales'].sum().reset_index()
-        fig = px.bar(
-            order_type_data,
+    # Revenue Analysis Section
+    st.header("Revenue Analysis")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("Average Revenue")
+        avg_metrics = {
+            "Daily Average": f"${metrics['daily_average']:,.2f}",
+            "Monthly Total": f"${metrics['monthly_average']:,.2f}",
+            "Yearly Projection": f"${metrics['yearly_projection']:,.2f}"
+        }
+        
+        for metric, value in avg_metrics.items():
+            st.metric(metric, value)
+    
+    with col2:
+        st.subheader("Key Insights")
+        # Top performing items by revenue
+        top_items = df.nlargest(5, 'Total sales')
+        st.write("Top 5 Revenue Generators:")
+        for idx, row in top_items.iterrows():
+            st.write(f"• {row['Order type']}: ${row['Total sales']:,.2f}")
+
+    # Sales Distribution
+    st.header("Sales Distribution")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        order_type_data = df.groupby('Order type')['Total sales'].sum().nlargest(5)
+        fig = px.pie(
+            values=order_type_data.values,
+            names=order_type_data.index,
+            title="Top 5 Categories by Revenue"
+        )
+        fig.update_traces(textposition='inside', textinfo='percent+label')
+        st.plotly_chart(fig, use_container_width=True)
+    
+    with col2:
+        # Monthly trend (if date data is available)
+        monthly_trend = px.bar(
+            df.groupby('Order type')['Total sales'].sum().nlargest(5).reset_index(),
             x='Order type',
             y='Total sales',
-            title="Sales by Order Type"
+            title="Top 5 Categories Revenue Breakdown"
         )
-        st.plotly_chart(fig, use_container_width=True)
+        monthly_trend.update_layout(xaxis_title="Category", yaxis_title="Revenue ($)")
+        st.plotly_chart(monthly_trend, use_container_width=True)
+
+    # Business Insights Section
+    st.header("Business Insights")
+    cols = st.columns(3)
+    
+    with cols[0]:
+        st.subheader("Top Performers")
+        st.write("Highest Revenue Day:")
+        st.write("Most Popular Item:")
+        st.write("Best Performing Category:")
+    
+    with cols[1]:
+        st.subheader("Customer Behavior")
+        st.write(f"Average Check Size: ${metrics['avg_check']:.2f}")
+        st.write(f"Typical Items per Visit: {metrics['items_per_cover']:.1f}")
+        st.write(f"Total Customer Visits: {metrics['total_covers']:,}")
+    
+    with cols[2]:
+        st.subheader("Operational Metrics")
+        st.write(f"Daily Revenue Target: ${metrics['daily_average']:,.2f}")
+        st.write(f"Monthly Revenue Target: ${metrics['monthly_average']:,.2f}")
+        st.write("Peak Hours: Coming soon")
 
 if __name__ == "__main__":
     main()
